@@ -1,0 +1,35 @@
+{
+  "name": "ami-pharma-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "AMI PHARMA — application de gestion de pharmacie web et Android",
+  "scripts": {
+    "install:all": "npm ci --prefix backend && npm ci --prefix frontend",
+    "web:build": "npm --prefix frontend run build",
+    "web:dev": "npm --prefix frontend run dev",
+    "api:dev": "npm --prefix backend run dev",
+    "mobile:sync": "npm run web:build && npx cap sync android",
+    "mobile:copy": "npm run web:build && npx cap copy android",
+    "mobile:open": "npx cap open android",
+    "android:debug": "npm run mobile:sync && cd android && ./gradlew assembleDebug",
+    "android:release": "npm run mobile:sync && cd android && ./gradlew assembleRelease",
+    "android:clean": "cd android && ./gradlew clean",
+    "test:frontend": "npm --prefix frontend run build",
+    "test:backend": "npm --prefix backend run test",
+    "test": "npm run test:frontend && npm run test:backend",
+    "cap:doctor": "npx cap doctor"
+  },
+  "dependencies": {
+    "@capacitor/android": "8.5.2",
+    "@capacitor/app": "8.1.1",
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/core": "8.5.2",
+    "@capacitor/network": "8.0.1",
+    "@capacitor/splash-screen": "8.0.2",
+    "@capacitor/status-bar": "8.0.3",
+    "capacitor-secure-storage-plugin": "0.13.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}
