@@ -1,0 +1,32 @@
+# Dependencies and build output
+node_modules/
+frontend/node_modules/
+backend/node_modules/
+frontend/dist/
+
+# Local configuration and databases
+.env
+.env.*
+!.env.example
+backend/.env
+backend/prisma/dev.db
+
+# Capacitor / Android generated caches and IDE files
+android/.gradle/
+android/build/
+android/app/build/
+android/captures/
+android/.idea/
+android/local.properties
+.gradle/
+.idea/
+*.iml
+*.jks
+*.keystore
+
+# Generated TypeScript metadata and logs
+*.tsbuildinfo
+*.log
+*.idsig
+
+# Keep deliverables under artifacts/ (APK/AAB) intentionally tracked.

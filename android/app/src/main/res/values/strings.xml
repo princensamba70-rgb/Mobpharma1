@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">AMI PHARMA</string>
+    <string name="title_activity_main">AMI PHARMA</string>
+    <string name="package_name">com.amipharma.gestion</string>
+    <string name="custom_url_scheme">com.amipharma.gestion</string>
+</resources>
