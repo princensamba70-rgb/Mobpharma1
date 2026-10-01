@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --safe-top: env(safe-area-inset-top, 0px);
+    --safe-right: env(safe-area-inset-right, 0px);
+    --safe-bottom: env(safe-area-inset-bottom, 0px);
+    --safe-left: env(safe-area-inset-left, 0px);
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+    text-size-adjust: 100%;
+    overscroll-behavior-y: none;
+  }
+  body {
+    @apply bg-slate-100 text-slate-800 antialiased;
+    min-width: 320px;
+    min-height: 100dvh;
+    padding-top: var(--safe-top);
+    padding-right: var(--safe-right);
+    padding-left: var(--safe-left);
+  }
+  #root { min-height: 100dvh; }
+  * { scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+  *::-webkit-scrollbar { width: 8px; height: 8px; }
+  *::-webkit-scrollbar-thumb { @apply bg-slate-300 rounded-full; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  button, a, input, select, textarea { touch-action: manipulation; }
+  button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+    @apply outline-none ring-2 ring-brand-500 ring-offset-2;
+  }
+}
+
+@layer components {
+  .card { @apply bg-white rounded-xl shadow-card border border-slate-200/70; }
+  .card-hover { @apply transition-shadow hover:shadow-cardhover; }
+  .btn { @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-all duration-150 focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]; min-height: 2.5rem; }
+  .btn-primary { @apply btn bg-brand-600 text-white hover:bg-brand-700 focus:ring-brand-500 shadow-sm; }
+  .btn-secondary { @apply btn bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus:ring-slate-400; }
+  .btn-danger { @apply btn bg-red-600 text-white hover:bg-red-700 focus:ring-red-500; }
+  .btn-ghost { @apply btn text-slate-600 hover:bg-slate-100 focus:ring-slate-300; }
+  .btn-sm { @apply px-3 py-1.5 text-xs; min-height: 2.25rem; }
+  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 placeholder-slate-400 focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 transition-shadow disabled:bg-slate-50 disabled:text-slate-500; min-height: 2.75rem; }
+  .label { @apply block text-xs font-semibold text-slate-600 mb-1.5 uppercase tracking-wide; }
+  .badge { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold whitespace-nowrap; }
+  .table-wrap { @apply overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-card; -webkit-overflow-scrolling: touch; }
+  .th { @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-50/80 border-b border-slate-200 whitespace-nowrap cursor-pointer select-none hover:text-slate-700; }
+  .th-static { @apply px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-slate-500 bg-slate-50/80 border-b border-slate-200 whitespace-nowrap; }
+  .td { @apply px-4 py-3 text-sm text-slate-700 border-b border-slate-100 whitespace-nowrap; }
+  .tr-hover { @apply hover:bg-brand-50/40 transition-colors; }
+  .stat-card { @apply card card-hover p-4 sm:p-5 flex items-start gap-4 animate-fade-in; min-height: 6.5rem; }
+  .sidebar-link { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-slate-300 hover:bg-white/10 hover:text-white transition-all duration-150; }
+  .sidebar-link-active { @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold bg-brand-500/20 text-white border-l-2 border-brand-400 transition-all; }
+  .modal-backdrop { @apply fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 animate-fade-in; padding-top: calc(1rem + var(--safe-top)); padding-bottom: calc(1rem + var(--safe-bottom)); }
+  .modal-panel { @apply bg-white rounded-2xl shadow-2xl w-full max-h-[92vh] overflow-hidden flex flex-col animate-scale-in; }
+  .toast { @apply pointer-events-auto flex items-start gap-3 rounded-xl border bg-white p-4 shadow-lg animate-slide-in; }
+  .mobile-bottom-nav { @apply fixed bottom-0 left-0 right-0 z-40 grid grid-cols-5 border-t border-slate-200 bg-white/95 shadow-[0_-4px_18px_rgba(15,23,42,0.08)] backdrop-blur; padding-bottom: var(--safe-bottom); }
+  .mobile-nav-item { @apply flex min-h-[3.75rem] flex-col items-center justify-center gap-0.5 text-[10px] font-semibold text-slate-400 transition-colors; }
+  .mobile-nav-item-active { @apply text-brand-700; }
+}
+
+@media (max-width: 1023px) {
+  .mobile-main { padding-bottom: calc(5rem + var(--safe-bottom)) !important; }
+  .modal-panel { max-height: calc(100dvh - 1rem - var(--safe-top) - var(--safe-bottom)); border-radius: 1rem; }
+  .modal-panel > div:last-child { padding: 1rem; }
+  .table-wrap { border-radius: .75rem; }
+  .table-wrap table { min-width: 42rem; }
+}
+
+@media (max-width: 640px) {
+  .modal-backdrop { align-items: flex-end; padding: 0; }
+  .modal-panel { max-width: none; width: 100%; border-radius: 1rem 1rem 0 0; }
+  .stat-card { padding: .85rem; gap: .65rem; }
+  .stat-card > div:first-child { padding: .55rem; }
+  .stat-card p { max-width: 9rem; }
+}
+
+/* Facture imprimable */
+@media print {
+  body * { visibility: hidden; }
+  #print-area, #print-area * { visibility: visible; }
+  #print-area { position: absolute; inset: 0; width: 100%; padding: 24px; }
+  .no-print { display: none !important; }
+  .mobile-bottom-nav { display: none !important; }
+}

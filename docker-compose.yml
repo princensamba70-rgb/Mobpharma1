@@ -1,0 +1,68 @@
+# AMI PHARMA — PHARMACY MANAGEMENT SYSTEM
+# Démarrage : cp .env.example .env (renseigner les secrets) && docker compose up --build -d
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: amipharma-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: amipharma
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD doit être défini dans .env}
+      POSTGRES_DB: amipharma
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U amipharma -d amipharma"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks: [amipharma]
+
+  api:
+    build: ./backend
+    container_name: amipharma-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-4001}:4000"
+    environment:
+      DATABASE_URL: postgresql://amipharma:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD requis}@db:5432/amipharma?schema=public
+      PORT: 4000
+      NODE_ENV: ${NODE_ENV:-production}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?JWT_ACCESS_SECRET doit être défini dans .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT_REFRESH_SECRET doit être défini dans .env}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:?ADMIN_INITIAL_PASSWORD doit être défini au premier démarrage}
+      FINANCE_INITIAL_PASSWORD: ${FINANCE_INITIAL_PASSWORD:?FINANCE_INITIAL_PASSWORD doit être défini au premier démarrage}
+      ASSISTANT_INITIAL_PASSWORD: ${ASSISTANT_INITIAL_PASSWORD:?ASSISTANT_INITIAL_PASSWORD doit être défini au premier démarrage}
+      CORS_ORIGIN: ${CORS_ORIGIN:-https://localhost,capacitor://localhost}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAMESITE: ${COOKIE_SAMESITE:-lax}
+      CURRENCY: ${CURRENCY:-CDF}
+      LOCALE: ${LOCALE:-fr-FR}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 5s
+      timeout: 3s
+      start_period: 90s
+      retries: 30
+    networks: [amipharma]
+
+  web:
+    build: ./frontend
+    container_name: amipharma-web
+    restart: unless-stopped
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [amipharma]
+
+volumes:
+  pgdata:
+
+networks:
+  amipharma:
+    driver: bridge

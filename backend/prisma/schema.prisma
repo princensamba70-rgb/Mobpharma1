@@ -1,0 +1,349 @@
+// AMI PHARMA — Schéma Prisma (variante SQLite pour développement local)
+// Généré depuis schema.postgres.prisma — les deux fichiers doivent rester synchronisés.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- UTILISATEURS & RÔLES ----------
+
+model Role {
+  id          String       @id // ADMIN | FINANCE | ASSISTANT
+  nom         String
+  description String?
+  users       User[]
+  permissions Permission[]
+  createdAt   DateTime     @default(now())
+}
+
+model Permission {
+  id       Int    @id @default(autoincrement())
+  roleId   String
+  module   String // dashboard, approvisionnement, facturation, stock, inventaire, finance, utilisateurs, parametres, rapports, audit
+  niveau   String // full | read | none
+  role     Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, module])
+  @@index([roleId])
+}
+
+model User {
+  id             Int       @id @default(autoincrement())
+  nom            String
+  prenom         String
+  username       String    @unique
+  passwordHash   String
+  telephone      String?
+  email          String?
+  roleId         String    @default("ASSISTANT")
+  actif          Boolean   @default(true)
+  lastLoginAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+  role           Role      @relation(fields: [roleId], references: [id])
+  ventes         Vente[]
+  approvisionnements Approvisionnement[]
+  inventaires    Inventaire[]
+  auditLogs      AuditLog[]
+  notifications  Notification[]
+
+  @@index([roleId])
+  @@index([username])
+}
+
+// ---------- CATALOGUE & PRODUITS ----------
+
+model Categorie {
+  id          Int          @id @default(autoincrement())
+  nom         String       @unique
+  description String?
+  medicaments Medicament[]
+}
+
+model Fournisseur {
+  id                 Int                 @id @default(autoincrement())
+  nom                String
+  telephone          String?
+  email              String?
+  adresse            String?
+  actif              Boolean             @default(true)
+  createdAt          DateTime            @default(now())
+  approvisionnements Approvisionnement[]
+  medicaments        Medicament[]
+}
+
+model PriceCatalog {
+  id          Int      @id @default(autoincrement())
+  numero      Int?
+  code        String
+  designation String
+  emballage   String?
+  prix        Decimal  @default(0)
+  devise      String   @default("CDF")
+  source      String   @default("LISTE DES PRIX(1).pdf")
+  importedAt  DateTime @default(now())
+  version     Int      @default(1)
+
+  @@unique([code, designation])
+  @@index([code])
+  @@index([designation])
+  @@index([importedAt])
+}
+
+model Medicament {
+  id             Int             @id @default(autoincrement())
+  code           String          @unique
+  nom            String
+  designation    String?
+  emballage      String?
+  prixAchat      Decimal         @default(0)
+  prixVente      Decimal         @default(0)
+  stock          Int             @default(0)
+  stockMinimal   Int             @default(5)
+  categorieId    Int?
+  fournisseurId  Int?
+  actif          Boolean         @default(true)
+  version        Int             @default(1)
+  deletedAt      DateTime?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  categorie      Categorie?      @relation(fields: [categorieId], references: [id])
+  fournisseur    Fournisseur?    @relation(fields: [fournisseurId], references: [id])
+  approvisionnementItems ApprovisionnementItem[]
+  venteItems     VenteItem[]
+  inventaireItems InventaireItem[]
+  stockMovements StockMovement[]
+
+  @@index([nom])
+  @@index([code])
+  @@index([actif])
+  @@index([updatedAt])
+}
+
+// ---------- APPROVISIONNEMENT ----------
+
+model Approvisionnement {
+  id              Int                   @id @default(autoincrement())
+  numero          String                @unique
+  fournisseurId   Int?
+  userId          Int
+  date            DateTime              @default(now())
+  totalAchat      Decimal               @default(0)
+  totalVente      Decimal               @default(0)
+  margePotentielle Decimal              @default(0)
+  statut          String                @default("VALIDE") // VALIDE | ANNULE
+  notes           String?
+  createdAt       DateTime              @default(now())
+  fournisseur     Fournisseur?          @relation(fields: [fournisseurId], references: [id])
+  user            User                  @relation(fields: [userId], references: [id])
+  items           ApprovisionnementItem[]
+
+  @@index([date])
+  @@index([numero])
+}
+
+model ApprovisionnementItem {
+  id                Int             @id @default(autoincrement())
+  approvisionnementId Int?
+  medicamentId      Int
+  quantite          Int
+  prixAchat         Decimal         @default(0)
+  prixVente         Decimal         @default(0)
+  valeurAchat       Decimal         @default(0)
+  valeurVente       Decimal         @default(0)
+  numLot            String?
+  dateExpiration    DateTime?
+  quantiteRestante  Int             @default(0)
+  approvisionnement Approvisionnement? @relation(fields: [approvisionnementId], references: [id], onDelete: Cascade)
+  medicament        Medicament      @relation(fields: [medicamentId], references: [id])
+
+  @@index([approvisionnementId])
+  @@index([medicamentId])
+  @@index([dateExpiration])
+}
+
+// ---------- VENTES / FACTURATION ----------
+
+model Vente {
+  id            Int          @id @default(autoincrement())
+  numero        String       @unique
+  syncId        String?      @unique
+  version       Int          @default(1)
+  deletedAt     DateTime?
+  syncConflict  String?
+  userId        Int
+  clientId      Int?
+  date          DateTime     @default(now())
+  total         Decimal      @default(0)
+  remise        Decimal      @default(0)
+  montantRecu   Decimal      @default(0)
+  modePaiement  String       @default("ESPECES") // ESPECES | MOBILE_MONEY | CARTE | CREDIT
+  statut        String       @default("VALIDEE") // VALIDEE | ANNULEE
+  motifAnnulation String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @default(now()) @updatedAt
+  user          User         @relation(fields: [userId], references: [id])
+  client        Client?      @relation(fields: [clientId], references: [id])
+  items         VenteItem[]
+
+  @@index([date])
+  @@index([numero])
+  @@index([statut])
+  @@index([updatedAt])
+}
+
+model VenteItem {
+  id           Int        @id @default(autoincrement())
+  venteId      Int
+  medicamentId Int
+  designation  String
+  emballage    String?
+  quantite     Int
+  prixUnitaire Decimal    @default(0)
+  sousTotal    Decimal    @default(0)
+  vente        Vente      @relation(fields: [venteId], references: [id], onDelete: Cascade)
+  medicament   Medicament @relation(fields: [medicamentId], references: [id])
+
+  @@index([venteId])
+  @@index([medicamentId])
+}
+
+model Client {
+  id       Int       @id @default(autoincrement())
+  nom      String
+  telephone String?
+  adresse  String?
+  createdAt DateTime @default(now())
+  ventes   Vente[]
+}
+
+// ---------- INVENTAIRE ----------
+
+model Inventaire {
+  id           Int               @id @default(autoincrement())
+  numero       String            @unique
+  date         DateTime          @default(now())
+  userId       Int
+  statut       String            @default("EN_COURS") // EN_COURS | VALIDE
+  observations String?
+  valideAt     DateTime?
+  createdAt    DateTime          @default(now())
+  user         User              @relation(fields: [userId], references: [id])
+  items        InventaireItem[]
+
+  @@index([date])
+}
+
+model InventaireItem {
+  id             Int        @id @default(autoincrement())
+  inventaireId   Int
+  medicamentId   Int
+  stockTheorique Int
+  stockPhysique  Int
+  ecart          Int        @default(0)
+  prixUnitaire   Decimal    @default(0)
+  valeurEcart    Decimal    @default(0)
+  observation    String?
+  inventaire     Inventaire @relation(fields: [inventaireId], references: [id], onDelete: Cascade)
+  medicament     Medicament @relation(fields: [medicamentId], references: [id])
+
+  @@index([inventaireId])
+  @@index([medicamentId])
+}
+
+// ---------- STOCK ----------
+
+model StockMovement {
+  id           Int        @id @default(autoincrement())
+  syncId       String?    @unique
+  medicamentId Int
+  type         String // APPROVISIONNEMENT | VENTE | ANNULATION_VENTE | AJUSTEMENT_INVENTAIRE | AJUSTEMENT_MANUEL
+  quantite     Int // signé : + entrée, - sortie
+  stockAvant   Int
+  stockApres   Int
+  reference    String? // n° document
+  motif        String?
+  userId       Int?
+  createdAt    DateTime   @default(now())
+  medicament   Medicament @relation(fields: [medicamentId], references: [id])
+
+  @@index([medicamentId])
+  @@index([createdAt])
+  @@index([type])
+}
+
+// ---------- FINANCE ----------
+
+model FinancialTransaction {
+  id          Int      @id @default(autoincrement())
+  type        String // VENTE | ACHAT | DEPENSE | AUTRE
+  montant     Decimal  @default(0)
+  sens        String   @default("ENTREE") // ENTREE | SORTIE
+  date        DateTime @default(now())
+  reference   String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+  @@index([type])
+}
+
+model DailyReport {
+  id               Int      @id @default(autoincrement())
+  date             DateTime @unique
+  nbVentes         Int      @default(0)
+  nbProduitsVendus Int      @default(0)
+  chiffreAffaires  Decimal  @default(0)
+  totalAchats      Decimal  @default(0)
+  margeBrute       Decimal  @default(0)
+  paiementsRecus   Decimal  @default(0)
+  genereAt         DateTime @default(now())
+}
+
+// ---------- NOTIFICATIONS & AUDIT ----------
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  type      String // STOCK_EPUISE | STOCK_FAIBLE | EXPIRATION | REAPPROVISIONNEMENT | FINANCE | SYSTEME
+  niveau    String   @default("info") // info | warning | danger | success
+  titre     String
+  message   String
+  lu        Boolean  @default(false)
+  userId    Int?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id])
+
+  @@index([lu])
+  @@index([createdAt])
+}
+
+model AuditLog {
+  id             Int      @id @default(autoincrement())
+  userId         Int?
+  username       String?
+  action         String // LOGIN | LOGOUT | CREATE | UPDATE | DELETE | ARCHIVE | VENTE | ANNULATION | APPROVISIONNEMENT | INVENTAIRE ...
+  module         String
+  description    String?
+  ancienneValeur String? // JSON
+  nouvelleValeur String? // JSON
+  ip             String?
+  createdAt      DateTime @default(now())
+  user           User?    @relation(fields: [userId], references: [id])
+
+  @@index([createdAt])
+  @@index([userId])
+  @@index([module])
+}
+
+// ---------- PARAMÈTRES ----------
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
