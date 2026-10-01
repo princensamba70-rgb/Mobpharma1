@@ -272,8 +272,9 @@ function AdjustModal({ med, onClose, onDone }: { med: any; onClose: () => void; 
       } catch (error: any) {
         if (error?.status === 0) toast('warning', 'Ajustement enregistré hors connexion. Synchronisation automatique dès que l’API répond.');
         else {
-          await markQueueFailed(`stock:${clientId}`, error.message, false, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
-          toast('error', `${error.message} — opération conservée dans Synchronisation.`);
+          const retryable = error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500;
+          await markQueueFailed(`stock:${clientId}`, error.message, retryable, new Date(Date.now() + (retryable ? 4_000 : 24 * 60 * 60 * 1000)).toISOString());
+          toast('error', retryable ? `${error.message} — nouvelle tentative automatique.` : `${error.message} — opération conservée dans Synchronisation.`);
         }
       }
       onDone();

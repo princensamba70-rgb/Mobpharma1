@@ -118,7 +118,10 @@ function dispatchApiEvent(name: string, detail?: Record<string, unknown>): void 
 }
 
 function isCacheableGet(url: string): boolean {
-  return /\/api\/(dashboard|stock|medicaments|catalog|rapports|settings|fournisseurs|approvisionnements|ventes|inventaires)(?:[/?]|$)/.test(url);
+  // Core business records are served from IndexedDB when offline. Keep the
+  // legacy string cache only for read-only dashboard/report presentation;
+  // never let it replace a durable product, price, stock or invoice record.
+  return /\/api\/(dashboard|rapports|settings)(?:[/?]|$)/.test(url);
 }
 
 function cacheKey(url: string): string {

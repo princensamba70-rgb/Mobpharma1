@@ -131,9 +131,11 @@ export default function Facturation() {
           setCart([]); setRecu(''); setMode('ESPECES');
           toast('warning', 'Vente enregistrée hors connexion. Elle sera synchronisée automatiquement au retour de l’API.');
         } else {
-          await markQueueFailed(`vente:${clientId}`, error.message, false, new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString());
+          const retryable = error.status === 408 || error.status === 425 || error.status === 429 || error.status >= 500;
+          const next = new Date(Date.now() + (retryable ? 4_000 : 24 * 60 * 60 * 1000)).toISOString();
+          await markQueueFailed(`vente:${clientId}`, error.message, retryable, next);
           setFacture({ ...localInvoice, syncStatus: 'FAILED', lastError: error.message });
-          toast('error', `${error.message} — opération conservée dans Synchronisation pour résolution.`);
+          toast('error', retryable ? `${error.message} — nouvelle tentative automatique.` : `${error.message} — opération conservée dans Synchronisation pour résolution.`);
         }
       }
     } catch (error: any) {

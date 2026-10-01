@@ -2,9 +2,11 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
   createOfflineInvoice,
+  createOfflineStockAdjustment,
   getLocalInvoicesPage,
   getLocalMedication,
   getSyncSummary,
+  getReadyQueue,
   listQueue,
   markQueueFailed,
   markQueueSynced,
@@ -70,5 +72,21 @@ describe('base métier locale et file durable', () => {
     expect((await getSyncSummary()).failed).toBe(1);
     await discardQueue(`vente:${secondId}`);
     expect((await getLocalMedication(42))?.stock).toBe(8);
+
+    const firstAdjustment = await createOfflineStockAdjustment({
+      clientId: '33333333-3333-4333-8333-333333333333', userId: 7,
+      medicament: (await getLocalMedication(42))!, nouveauStock: 6, motif: 'Comptage du rayon',
+    });
+    const secondAdjustment = await createOfflineStockAdjustment({
+      clientId: '44444444-4444-4444-8444-444444444444', userId: 7,
+      medicament: (await getLocalMedication(42))!, nouveauStock: 5, motif: 'Deuxième comptage',
+    });
+    expect(firstAdjustment.payload.baseStock).toBe(8);
+    expect(secondAdjustment.payload.baseStock).toBe(6);
+    expect(secondAdjustment.payload.baseVersion).toBeUndefined();
+    expect((await getReadyQueue()).map((q) => q.id)).toEqual([
+      'stock:33333333-3333-4333-8333-333333333333',
+      'stock:44444444-4444-4444-8444-444444444444',
+    ]);
   });
 });

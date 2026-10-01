@@ -119,7 +119,7 @@ Le projet conserve les pages et l’API existantes et ajoute une couche locale m
 ### Écritures offline et reprise
 
 - une facture créée hors ligne reçoit immédiatement un UUID `syncId` stable, est stockée dans IndexedDB avec son prix réellement utilisé, réserve/déduit localement le stock et est ajoutée atomiquement à `sync_queue` ;
-- un ajustement manuel de stock autorisé suit le même chemin ; les mouvements générés par une vente sont créés transactionnellement côté serveur ;
+- un ajustement manuel de stock autorisé suit le même chemin et conserve le stock/version serveur de référence ; si un autre appareil a modifié le produit entre-temps, l’API renvoie un conflit `409` explicite au lieu d’écraser silencieusement le mouvement ; les mouvements générés par une vente sont créés transactionnellement côté serveur ;
 - les états persistants de la queue sont `PENDING`, `SYNCING`, `SYNCED`, `FAILED`, avec compteur de tentatives, timeout réseau, backoff exponentiel et remise en file après interruption ;
 - le serveur déduplique avec `Vente.syncId` et `StockMovement.syncId`. Un retry après une coupure après commit renvoie la ressource existante au lieu de créer un doublon ;
 - les erreurs de stock ou de validation ne sont pas écrasées : elles restent `FAILED`, affichent leur message dans **Synchronisation** et peuvent être réessayées ou annulées localement avec restauration de la réserve ;
@@ -241,7 +241,7 @@ Une build debug installable est également livrée dans `artifacts/ami-pharma-de
 | application ID | `com.amipharma.gestion` |
 | SDK fallback | min 24 / target 34 (le projet Capacitor Gradle cible 36) |
 | taille | `267 235 octets` |
-| SHA-256 | `633606921e29112345625e09450329f46fac522aa88b1ee410eef56614cb1c4f` |
+| SHA-256 | `258edc5caaba224edc75549b7874d3457536f38eaf7a1a6e301ea4e51dedd212` |
 | vérification | signature APK v2/v3 valide, manifeste contrôlé par `aapt2 dump badging` |
 
 Cette sandbox ne disposait pas du JDK/SDK requis par Gradle et le runtime Java réduit ne fournit pas `java.compiler`. L'APK livré a donc été produit par le wrapper de secours documenté dans `tools/android-fallback/`, avec le bundle React/IndexedDB/service-worker actuel, un wrapper dex de développement déjà compilé et un stockage AES/GCM protégé par Android Keystore. La signature v2/v3 a été vérifiée ; ce n'est pas un build Gradle officiel. Le projet `android/` Capacitor reste la voie canonique et doit être utilisé pour les builds de release et pour bénéficier de tous les plugins Capacitor. L'APK de secours accepte les endpoints `http://` et `https://` ; sa valeur par défaut est l'émulateur Android (`http://10.0.2.2:4000`). Sur un téléphone, renseignez l'URL API depuis **Serveur de données** ou reconstruisez avec `VITE_API_URL`. Aucun secret réel ni clé privée n'est livré dans le dépôt.
@@ -272,10 +272,11 @@ Sans ces variables, Gradle peut produire un release non signé destiné à une s
 - `npm run web:build` : TypeScript/Vite et bundle app shell ;
 - `npm --prefix frontend run test` : 3 fichiers, 9 tests, dont la base IndexedDB, le snapshot de prix, la réservation stock, `sync_queue`, l’acquittement et l’annulation locale ;
 - `npm --prefix backend run test` : 5 tests Node sur arrondis, stock et cookies HTTP/HTTPS ;
+- `npm test` à la racine : build frontend, 9 tests frontend et 5 tests backend ;
 - `node --check` sur tous les fichiers `backend/src/**/*.js` ;
 - `npm run mobile:sync` puis `npm run cap:doctor` : Capacitor 8, plugins et assets Android synchronisés ;
 - wrapper fallback : bundle avec IndexedDB/service worker inclus, manifeste inspecté, APK signé et vérifié en signatures v2/v3 ;
-- SHA-256 recalculé après cette mission : `633606921e29112345625e09450329f46fac522aa88b1ee410eef56614cb1c4f`.
+- SHA-256 recalculé après cette actualisation : `258edc5caaba224edc75549b7874d3457536f38eaf7a1a6e301ea4e51dedd212`.
 
 ⚠ Vérifications non exécutées dans cette sandbox :
 

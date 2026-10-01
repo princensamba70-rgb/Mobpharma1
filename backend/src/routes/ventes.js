@@ -168,13 +168,18 @@ router.post('/', requirePerm('facturation', 'full'), validate(saleSchema), async
       }
 
       // The invoice stores the gross line snapshots and the explicit discount;
-      // its total is the net amount that was actually paid.
+      // its total is the net amount that was actually paid. Vente.numero is
+      // required by both Prisma schemas, so allocate it inside the same
+      // transaction as the invoice. It must never be left to an implicit DB
+      // default (there is none).
+      const numero = await nextNumero(tx, 'vente', 'FAC');
       const remise = round2(d.remise || 0);
       if (remise > total) throw new ApiError(400, 'La remise ne peut pas dépasser le total de la vente');
       total = round2(total - remise);
 
       const created = await tx.vente.create({
         data: {
+          numero,
           syncId: d.syncId || null,
           userId: req.user.id,
           clientId: d.clientId || null,

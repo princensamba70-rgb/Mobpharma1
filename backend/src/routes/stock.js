@@ -98,9 +98,14 @@ router.post('/ajustement', requirePerm('stock', 'full'), validate(z.object({
   syncId: z.string().uuid().optional(),
   medicamentId: z.number().int(),
   nouveauStock: z.number().int().min(0),
+  // Offline adjustments carry the server baseline they were based on. If a
+  // second device changed the product meanwhile, return a visible conflict
+  // instead of overwriting that movement silently.
+  baseStock: z.number().int().min(0).optional(),
+  baseVersion: z.number().int().min(1).optional(),
   motif: z.string().min(5, 'Le motif de l\'ajustement est obligatoire (5 caractères min.)').max(300),
 })), asyncH(async (req, res) => {
-  const { syncId, medicamentId, nouveauStock, motif } = req.validated;
+  const { syncId, medicamentId, nouveauStock, baseStock, baseVersion, motif } = req.validated;
 
   // The movement UUID is the durable idempotency key for a manual adjustment.
   if (syncId) {
@@ -108,13 +113,26 @@ router.post('/ajustement', requirePerm('stock', 'full'), validate(z.object({
     if (alreadyApplied) return res.json({ ok: true, duplicate: true, message: 'Ajustement déjà enregistré', mouvement: alreadyApplied });
   }
 
-  const med = await prisma.medicament.findUnique({ where: { id: medicamentId } });
-  if (!med) throw new ApiError(404, 'Médicament introuvable');
-
+  let med;
   const result = await prisma.$transaction(async (tx) => {
     if (syncId) {
       const raceWinner = await tx.stockMovement.findUnique({ where: { syncId } });
-      if (raceWinner) return raceWinner;
+      if (raceWinner) return { duplicate: true, movement: raceWinner };
+    }
+    // Read the product inside the transaction. The old implementation read it
+    // before opening the transaction, allowing a concurrent device to be
+    // overwritten with a stale `nouveauStock`.
+    med = await tx.medicament.findUnique({ where: { id: medicamentId } });
+    if (!med) throw new ApiError(404, 'Médicament introuvable');
+    if (baseStock !== undefined && toNum(med.stock) !== baseStock) {
+      throw new ApiError(409, `Conflit de stock pour « ${med.nom} » : le serveur contient ${toNum(med.stock)} alors que l’opération locale était basée sur ${baseStock}`, {
+        type: 'STOCK_CONFLICT', medicamentId, baseStock, currentStock: toNum(med.stock),
+      });
+    }
+    if (baseVersion !== undefined && med.version !== baseVersion) {
+      throw new ApiError(409, `Conflit de version pour « ${med.nom} » : actualisez le stock avant de réessayer`, {
+        type: 'VERSION_CONFLICT', medicamentId, baseVersion, currentVersion: med.version,
+      });
     }
     const stockAvant = toNum(med.stock);
     const delta = nouveauStock - stockAvant;
@@ -144,6 +162,8 @@ router.post('/ajustement', requirePerm('stock', 'full'), validate(z.object({
     });
     return mv;
   });
+
+  if (result?.duplicate) return res.json({ ok: true, duplicate: true, message: 'Ajustement déjà enregistré', mouvement: result.movement });
 
   await logAudit(prisma, {
     user: req.user, action: 'AJUSTEMENT_STOCK', module: 'stock', ip: clientIp(req),

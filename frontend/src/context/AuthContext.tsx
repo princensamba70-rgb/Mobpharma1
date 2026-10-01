@@ -60,7 +60,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refreshUser(); }, []);
   useEffect(() => {
-    const onLogout = () => { setUser(null); };
+    const onLogout = () => { setUser(null); void setActiveUserId(null); };
     window.addEventListener('ap:logout', onLogout);
     return () => window.removeEventListener('ap:logout', onLogout);
   }, []);

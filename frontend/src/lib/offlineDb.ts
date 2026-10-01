@@ -253,8 +253,13 @@ async function deleteRecord(storeName: string, key: IDBValidKey): Promise<void> 
 }
 
 function normaliseMedication(raw: any, previous?: LocalMedication): LocalMedication {
-  const remoteStock = Number(raw.stock ?? previous?.serverStock ?? previous?.stock ?? 0);
-  const delta = Number(previous?.localStockDelta || 0);
+  // `stock` is the displayed value and may already include local pending
+  // operations. When a local record is rewritten, prefer its server baseline
+  // so the pending delta is not added twice. A pull from the API has no
+  // serverStock field and therefore correctly uses its authoritative `stock`.
+  const hasServerBaseline = raw && Object.prototype.hasOwnProperty.call(raw, 'serverStock');
+  const remoteStock = Number(hasServerBaseline ? raw.serverStock : (raw.stock ?? previous?.serverStock ?? previous?.stock ?? 0));
+  const delta = Number(raw?.localStockDelta ?? previous?.localStockDelta ?? 0);
   return {
     ...previous,
     ...raw,
@@ -406,7 +411,7 @@ export async function createOfflineInvoice(input: {
   for (const line of input.lines) {
     const stored = current.get(line.med.id);
     const med = stored || normaliseMedication(line.med);
-    const available = Number(med.stock);
+    const available = Number(med.stock) + Number(deltas.get(med.id) || 0);
     if (available < line.qty) throw new Error(`Stock insuffisant pour « ${med.nom} » (disponible : ${available})`);
     const price = Number(line.med.prixVente || med.prixVente || 0);
     if (price <= 0) throw new Error(`Prix non défini pour « ${med.nom} »`);
@@ -502,6 +507,10 @@ export async function createOfflineStockAdjustment(input: {
       syncId: input.clientId,
       medicamentId: med.id,
       nouveauStock: input.nouveauStock,
+      // The server rejects a stale offline count instead of silently
+      // overwriting a movement made on another device in the meantime.
+      baseStock: Number(med.serverStock ?? med.stock),
+      ...(med.version !== undefined ? { baseVersion: Number(med.version) } : {}),
       motif: input.motif,
     },
     status: 'PENDING',
@@ -514,6 +523,14 @@ export async function createOfflineStockAdjustment(input: {
   };
   const serverStock = Number(med.serverStock ?? med.stock);
   const currentDelta = Number(med.localStockDelta || 0);
+  // If earlier local operations are still queued, this adjustment is based on
+  // the server value expected after those operations. The queue is sent FIFO;
+  // the server can therefore still reject a real cross-device change, while
+  // two legitimate offline adjustments from this device do not conflict with
+  // one another merely because they were both created before reconnection.
+  queue.payload.baseStock = serverStock + currentDelta;
+  if (currentDelta === 0 && med.version !== undefined) queue.payload.baseVersion = Number(med.version);
+  else delete queue.payload.baseVersion;
   const tx = db.transaction([MEDICATIONS, QUEUE], 'readwrite');
   tx.objectStore(MEDICATIONS).put({ ...normaliseMedication(med, med), serverStock, localStockDelta: currentDelta + delta, stock: serverStock + currentDelta + delta });
   tx.objectStore(QUEUE).put(queue);
@@ -671,7 +688,11 @@ export async function listQueue(): Promise<SyncQueueRecord[]> {
 export async function getReadyQueue(): Promise<SyncQueueRecord[]> {
   const now = Date.now();
   const rows = await listQueue();
-  return rows.filter((q) => (q.status === 'PENDING' || (q.status === 'FAILED' && q.retryable !== false)) && new Date(q.nextAttemptAt).getTime() <= now);
+  // Push oldest first. A later offline adjustment or sale may be based on the
+  // stock state produced by an earlier queued operation from this device.
+  return rows
+    .filter((q) => (q.status === 'PENDING' || (q.status === 'FAILED' && q.retryable !== false)) && new Date(q.nextAttemptAt).getTime() <= now)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime() || a.id.localeCompare(b.id));
 }
 
 export async function markQueueSyncing(queueId: string): Promise<SyncQueueRecord | undefined> {
