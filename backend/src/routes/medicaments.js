@@ -13,7 +13,7 @@ router.use(authenticate);
 // GET /api/medicaments — liste avec recherche, filtres, tri, pagination
 router.get('/', requirePerm('medicaments', 'read'), asyncH(async (req, res) => {
   const { q, statut, categorieId, fournisseurId, page = 1, pageSize = 25, sortBy = 'nom', sortDir = 'asc', includeArchived } = req.query;
-  const settings = await getSettings();
+  const settingsPromise = getSettings();
   const where = {};
   if (!includeArchived) where.actif = true;
   if (q) {
@@ -27,41 +27,62 @@ router.get('/', requirePerm('medicaments', 'read'), asyncH(async (req, res) => {
   if (categorieId) where.categorieId = parseInt(categorieId, 10);
   if (fournisseurId) where.fournisseurId = parseInt(fournisseurId, 10);
 
-  const total = await prisma.medicament.count({ where });
-  let rows = await prisma.medicament.findMany({
-    where,
-    include: { categorie: true, fournisseur: { select: { id: true, nom: true } } },
-    orderBy: { [sortBy]: sortDir === 'desc' ? 'desc' : 'asc' },
-  });
-  const expMap = await expirationMap();
-  rows = rows.map((m) => enrichMedicament(m, expMap, settings.expSeuils));
-  if (statut && statut !== 'TOUS') rows = rows.filter((m) => m.statut === statut);
-
   const p = Math.max(1, parseInt(page, 10));
   const ps = Math.min(200, Math.max(5, parseInt(pageSize, 10)));
-  const paged = rows.slice((p - 1) * ps, p * ps);
-  res.json({ total: rows.length, page: p, pageSize: ps, count: total, items: paged });
+  const needsComputedStatus = Boolean(statut && statut !== 'TOUS');
+  const allowedSorts = new Set(['nom', 'code', 'stock', 'prixAchat', 'prixVente', 'updatedAt', 'createdAt']);
+  const safeSort = allowedSorts.has(String(sortBy)) ? String(sortBy) : 'nom';
+  const findArgs = {
+    where,
+    select: {
+      id: true, code: true, nom: true, designation: true, emballage: true,
+      prixAchat: true, prixVente: true, stock: true, stockMinimal: true,
+      actif: true, version: true, deletedAt: true, createdAt: true, updatedAt: true,
+      categorie: { select: { id: true, nom: true } }, fournisseur: { select: { id: true, nom: true } },
+    },
+    orderBy: { [safeSort]: sortDir === 'desc' ? 'desc' : 'asc' },
+    ...(needsComputedStatus ? {} : { skip: (p - 1) * ps, take: ps }),
+  };
+  const [settings, total, rows, expMap] = await Promise.all([
+    settingsPromise,
+    prisma.medicament.count({ where }),
+    prisma.medicament.findMany(findArgs),
+    expirationMap(),
+  ]);
+  let items = rows.map((m) => enrichMedicament(m, expMap, settings.expSeuils));
+  const filteredTotal = needsComputedStatus ? items.filter((m) => m.statut === statut).length : total;
+  if (needsComputedStatus) {
+    items = items.filter((m) => m.statut === statut).slice((p - 1) * ps, p * ps);
+  }
+  res.json({ total: filteredTotal, page: p, pageSize: ps, count: total, items });
 }));
 
 // GET /api/medicaments/search — recherche instantanée (typeahead)
 router.get('/search', requirePerm('medicaments', 'read'), asyncH(async (req, res) => {
   const q = (req.query.q || '').trim();
   if (q.length < 1) return res.json([]);
-  const meds = await prisma.medicament.findMany({
-    where: {
-      actif: true,
-      OR: [
-        { code: { contains: q } },
-        { nom: { contains: q } },
-        { designation: { contains: q } },
-        { emballage: { contains: q } },
-      ],
-    },
-    take: 12,
-    orderBy: [{ nom: 'asc' }],
-  });
-  const expMap = await expirationMap();
-  const settings = await getSettings();
+  const [meds, expMap, settings] = await Promise.all([
+    prisma.medicament.findMany({
+      where: {
+        actif: true,
+        OR: [
+          { code: { contains: q } },
+          { nom: { contains: q } },
+          { designation: { contains: q } },
+          { emballage: { contains: q } },
+        ],
+      },
+      select: {
+        id: true, code: true, nom: true, designation: true, emballage: true,
+        prixAchat: true, prixVente: true, stock: true, stockMinimal: true,
+        actif: true, version: true, deletedAt: true, createdAt: true, updatedAt: true,
+      },
+      take: 12,
+      orderBy: [{ nom: 'asc' }],
+    }),
+    expirationMap(),
+    getSettings(),
+  ]);
   res.json(meds.map((m) => enrichMedicament(m, expMap, settings.expSeuils)));
 }));
 
@@ -72,8 +93,7 @@ router.get('/:id', requirePerm('medicaments', 'read'), asyncH(async (req, res) =
     include: { categorie: true, fournisseur: true },
   });
   if (!med) throw new ApiError(404, 'Médicament introuvable');
-  const expMap = await expirationMap();
-  const settings = await getSettings();
+  const [expMap, settings] = await Promise.all([expirationMap(), getSettings()]);
   res.json(enrichMedicament(med, expMap, settings.expSeuils));
 }));
 

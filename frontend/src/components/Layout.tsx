@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate, Outlet, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, ShoppingCart, ReceiptText, Truck, PackageSearch, Boxes,
@@ -121,10 +121,19 @@ function NotificationsBell() {
   const [open, setOpen] = useState(false);
   const [data, setData] = useState<any>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const { user } = useAuth();
-
-  const load = () => api.get('/api/notifications').then(setData).catch(() => {});
-  useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, []);
+  const load = useCallback(() => api.get('/api/notifications').then(setData).catch(() => {}), []);
+  useEffect(() => {
+    // Notifications are ancillary and compute stock alerts on the server. Do
+    // not compete with authentication/dashboard during the critical boot
+    // path; load on demand and refresh only while the panel is open.
+    if (open) {
+      void load();
+      const interval = window.setInterval(() => { void load(); }, 60_000);
+      return () => window.clearInterval(interval);
+    }
+    const deferred = window.setTimeout(() => { void load(); }, 5_000);
+    return () => window.clearTimeout(deferred);
+  }, [open, load]);
   useEffect(() => {
     const h = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
     document.addEventListener('mousedown', h);

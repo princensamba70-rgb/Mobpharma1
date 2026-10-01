@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
@@ -5,23 +6,27 @@ import { NetworkProvider } from './context/NetworkContext';
 import NativeRuntime from './components/NativeRuntime';
 import Layout from './components/Layout';
 import { Spinner } from './components/ui';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Facturation from './pages/Facturation';
-import Ventes from './pages/Ventes';
-import Approvisionnements from './pages/Approvisionnements';
-import Stock from './pages/Stock';
-import Inventaires from './pages/Inventaires';
-import RapportJournalier from './pages/RapportJournalier';
-import RapportAppro from './pages/RapportAppro';
-import Finance from './pages/Finance';
-import Medicaments from './pages/Medicaments';
-import Catalogue from './pages/Catalogue';
-import Fournisseurs from './pages/Fournisseurs';
-import Utilisateurs from './pages/Utilisateurs';
-import Audit from './pages/Audit';
-import Parametres from './pages/Parametres';
-import Synchronisation from './pages/Synchronisation';
+
+// Keep the authentication shell small. The original static imports pulled all
+// 18 pages, Recharts and every page dependency into the first JavaScript chunk
+// even when the visitor was still on the login screen.
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Facturation = lazy(() => import('./pages/Facturation'));
+const Ventes = lazy(() => import('./pages/Ventes'));
+const Approvisionnements = lazy(() => import('./pages/Approvisionnements'));
+const Stock = lazy(() => import('./pages/Stock'));
+const Inventaires = lazy(() => import('./pages/Inventaires'));
+const RapportJournalier = lazy(() => import('./pages/RapportJournalier'));
+const RapportAppro = lazy(() => import('./pages/RapportAppro'));
+const Finance = lazy(() => import('./pages/Finance'));
+const Medicaments = lazy(() => import('./pages/Medicaments'));
+const Catalogue = lazy(() => import('./pages/Catalogue'));
+const Fournisseurs = lazy(() => import('./pages/Fournisseurs'));
+const Utilisateurs = lazy(() => import('./pages/Utilisateurs'));
+const Audit = lazy(() => import('./pages/Audit'));
+const Parametres = lazy(() => import('./pages/Parametres'));
+const Synchronisation = lazy(() => import('./pages/Synchronisation'));
 
 function PermRoute({ perm, niveau = 'read', children }: { perm?: string; niveau?: 'full' | 'read'; children: JSX.Element }) {
   const { user, loading, can } = useAuth();
@@ -42,6 +47,15 @@ function PermRoute({ perm, niveau = 'read', children }: { perm?: string; niveau?
   return children;
 }
 
+function RouteFallback() {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-[50vh] gap-3 bg-slate-50 p-6">
+      <Spinner className="w-8 h-8" />
+      <p className="text-sm text-slate-500 font-medium">Ouverture du module…</p>
+    </div>
+  );
+}
+
 function Shell() {
   const { user, loading } = useAuth();
   if (loading) {
@@ -54,14 +68,17 @@ function Shell() {
   }
   if (!user) {
     return (
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <Suspense fallback={<RouteFallback />}>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
     );
   }
   return (
-    <Routes>
+    <Suspense fallback={<RouteFallback />}>
+      <Routes>
       <Route path="/login" element={<Navigate to="/" replace />} />
       <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
@@ -83,7 +100,8 @@ function Shell() {
         <Route path="/parametres" element={<PermRoute perm="parametres" niveau="full"><Parametres /></PermRoute>} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
-    </Routes>
+      </Routes>
+    </Suspense>
   );
 }
 

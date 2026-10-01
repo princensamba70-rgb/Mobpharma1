@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Network, type ConnectionStatus } from '@capacitor/network';
-import { api } from '../api/client';
+import { api, AUTH_REQUEST_TIMEOUT_MS } from '../api/client';
 import {
   getSyncState,
   loadSyncState,
@@ -80,7 +80,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       try {
         // This probe is intentionally a real API request. Wi-Fi/Capacitor's
         // connected flag alone is never treated as server availability.
-        await api.get('/api/health');
+        await api.get('/api/health', { timeoutMs: AUTH_REQUEST_TIMEOUT_MS });
         if (!mounted) return;
         setApiReachable(true);
         setApiReachability(true);

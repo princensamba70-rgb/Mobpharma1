@@ -21,7 +21,11 @@ export class ApiError extends Error {
 const API_ORIGIN_KEY = 'ami_pharma_api_origin_v1';
 const CACHE_PREFIX = 'ami_pharma_api_cache_v1:';
 const DEFAULT_NATIVE_API = 'http://10.0.2.2:4000';
-const REQUEST_TIMEOUT_MS = 30_000;
+const REQUEST_TIMEOUT_MS = 15_000;
+// Authentication is part of the app boot path. It must fail fast enough to
+// show the login/offline shell instead of holding the whole application behind
+// a dead API for the full business-request timeout.
+export const AUTH_REQUEST_TIMEOUT_MS = 6_000;
 
 let refreshPromise: Promise<string | null> | null = null;
 
@@ -95,13 +99,10 @@ export function apiUrl(pathOrUrl: string): string {
 
 export async function initApiSession(): Promise<void> {
   await initSecureSession();
-  // A browser deliberately has no token in JavaScript after a reload. Restore
-  // the in-memory access token through the server's httpOnly cookie instead of
-  // declaring the user logged out before trying the refresh endpoint.
-  // When the transport is offline, do not wait for a refresh request that
-  // cannot succeed. AuthContext can restore the cached non-secret profile and
-  // keep the local business database usable until the API returns.
-  if (!getAccessToken() && (typeof navigator === 'undefined' || navigator.onLine !== false)) await tryRefresh();
+  // Do not probe /auth/refresh here. The first authenticated request handles
+  // a 401 and performs one shared refresh, avoiding two refresh calls during
+  // boot when no access token is present. AuthContext skips that request when
+  // the transport is already offline and can hydrate the local profile.
 }
 
 export function getToken(): string | null {
@@ -148,6 +149,10 @@ function readCachedResponse(url: string): unknown | undefined {
   } catch { return undefined; }
 }
 
+export function getCachedApiResponse(pathOrUrl: string): unknown | undefined {
+  return readCachedResponse(apiUrl(pathOrUrl));
+}
+
 export function clearApiCache(): void {
   if (typeof window === 'undefined') return;
   const keys: string[] = [];
@@ -175,9 +180,11 @@ async function tryRefresh(): Promise<string | null> {
       if (body) headers['Content-Type'] = 'application/json';
       if (isNativeApp()) headers['X-Client-Platform'] = 'android';
 
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => controller.abort(), AUTH_REQUEST_TIMEOUT_MS);
       try {
         const response = await fetch(apiUrl('/api/auth/refresh'), {
-          method: 'POST', headers, credentials: 'include', body,
+          method: 'POST', headers, credentials: 'include', body, signal: controller.signal,
         });
         if (!response.ok) return null;
         const data = await response.json();
@@ -185,13 +192,15 @@ async function tryRefresh(): Promise<string | null> {
         return data.accessToken as string;
       } catch {
         return null;
+      } finally {
+        window.clearTimeout(timeout);
       }
     })().finally(() => { refreshPromise = null; });
   }
   return refreshPromise;
 }
 
-async function request(method: string, path: string, body?: any, retry = true): Promise<any> {
+async function request(method: string, path: string, body?: any, retry = true, options: ApiRequestOptions = {}): Promise<any> {
   await initSecureSession();
   const target = apiUrl(path);
   const headers: Record<string, string> = { Accept: 'application/json' };
@@ -204,8 +213,11 @@ async function request(method: string, path: string, body?: any, retry = true): 
     throw new ApiError(0, 'Vous êtes hors connexion. Cette opération nécessite une connexion au serveur.');
   }
 
+  if (options.signal?.aborted) throw new DOMException('Requête annulée', 'AbortError');
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), options.timeoutMs ?? REQUEST_TIMEOUT_MS);
+  const abortFromCaller = () => controller.abort();
+  options.signal?.addEventListener('abort', abortFromCaller, { once: true });
   let response: Response;
   try {
     response = await fetch(target, {
@@ -214,7 +226,9 @@ async function request(method: string, path: string, body?: any, retry = true): 
       signal: controller.signal,
     });
   } catch (error) {
-    window.clearTimeout(timeout);
+    // Component-level cancellation (for example a superseded typeahead
+    // search) is not evidence that the API went offline.
+    if (options.signal?.aborted) throw error;
     if (method === 'GET') {
       const cached = readCachedResponse(target);
       if (cached !== undefined) {
@@ -223,13 +237,16 @@ async function request(method: string, path: string, body?: any, retry = true): 
       }
     }
     throw networkError(target, error);
+  } finally {
+    window.clearTimeout(timeout);
+    options.signal?.removeEventListener('abort', abortFromCaller);
   }
-  window.clearTimeout(timeout);
   dispatchApiEvent('ap:api-online', { url: target });
 
+  if (options.signal?.aborted) throw new DOMException('Requête annulée', 'AbortError');
   if (response.status === 401 && retry && !/\/auth\/(login|refresh)$/.test(path)) {
     const nextToken = await tryRefresh();
-    if (nextToken) return request(method, path, body, false);
+    if (nextToken) return request(method, path, body, false, options);
     await clearSessionTokens();
     dispatchApiEvent('ap:logout');
     throw new ApiError(401, 'Session expirée, veuillez vous reconnecter.');
@@ -257,8 +274,13 @@ async function request(method: string, path: string, body?: any, retry = true): 
   return result;
 }
 
+export interface ApiRequestOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 export const api = {
-  get: (url: string) => request('GET', url),
+  get: (url: string, options?: ApiRequestOptions) => request('GET', url, undefined, true, options),
   post: (url: string, body?: any) => request('POST', url, body ?? {}),
   put: (url: string, body?: any) => request('PUT', url, body ?? {}),
   del: (url: string) => request('DELETE', url),
@@ -271,21 +293,25 @@ export async function downloadExport(url: string, filename: string): Promise<voi
   const token = getAccessToken();
   if (token) headers.Authorization = `Bearer ${token}`;
   if (isNativeApp()) headers['X-Client-Platform'] = 'android';
-  let response: Response;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 120_000);
   try {
-    response = await fetch(apiUrl(url), { headers, credentials: 'include' });
+    const response = await fetch(apiUrl(url), { headers, credentials: 'include', signal: controller.signal });
+    if (!response.ok) throw new ApiError(response.status, 'Échec du téléchargement');
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    anchor.rel = 'noopener';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
   } catch (error) {
+    if (error instanceof ApiError) throw error;
     throw networkError(url, error);
+  } finally {
+    window.clearTimeout(timeout);
   }
-  if (!response.ok) throw new ApiError(response.status, 'Échec du téléchargement');
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  anchor.rel = 'noopener';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
 }

@@ -4,8 +4,8 @@ import { authenticate } from '../middleware/auth.js';
 import { asyncH } from '../middleware/error.js';
 import { toNum, round2, startOfDay, addDays, endOfDay } from '../lib/utils.js';
 import {
-  parseRange, getSettings, expirationMap, enrichMedicament, dailySeries,
-  topProduitsVendus, topProduitsAchete, listeReapprovisionnement, computeAlertes,
+  parseRange, getSettings, expirationMap, enrichMedicament, dashboardSalesData,
+  topProduitsAchetePair, buildReapprovisionnement, computeAlertesFromEnriched,
 } from '../lib/stats.js';
 
 const router = Router();
@@ -14,46 +14,59 @@ router.use(authenticate);
 // GET /api/dashboard — tableau de bord (contenu selon rôle)
 router.get('/', asyncH(async (req, res) => {
   const { from, to } = parseRange(req.query);
-  const settings = await getSettings();
   const today = startOfDay();
+  const dayWhere = { date: { gte: today, lte: endOfDay() }, statut: 'VALIDEE' };
+  const periodWhere = { date: { gte: from, lte: to }, statut: 'VALIDEE' };
 
-  const [meds, ventesToday, ventesPeriod, ventesAgg, approsPeriod, approsCount, depenses] = await Promise.all([
-    prisma.medicament.findMany({ where: { actif: true } }),
-    prisma.vente.findMany({ where: { date: { gte: today, lte: endOfDay() }, statut: 'VALIDEE' }, select: { total: true } }),
-    prisma.vente.findMany({ where: { date: { gte: from, lte: to }, statut: 'VALIDEE' }, select: { total: true, montantRecu: true } }),
-    prisma.vente.aggregate({ where: { statut: 'VALIDEE' }, _sum: { total: true }, _count: true }),
-    prisma.approvisionnement.aggregate({ where: { date: { gte: from, lte: to }, statut: 'VALIDE' }, _sum: { totalAchat: true }, _count: true }),
-    prisma.approvisionnement.count(),
-    prisma.financialTransaction.aggregate({ where: { type: 'DEPENSE' }, _sum: { montant: true } }),
+  // Settings, counters and aggregates are independent. The old route also
+  // materialised every sale just to sum totals; aggregates transfer only a
+  // handful of values and return much faster on a large pharmacy database.
+  const [settings, [meds, ventesToday, ventesPeriod, ventesAgg, approsPeriod, approsCount, depenses]] = await Promise.all([
+    getSettings(),
+    Promise.all([
+      prisma.medicament.findMany({
+        where: { actif: true },
+        select: {
+          id: true, code: true, nom: true, emballage: true, prixAchat: true,
+          prixVente: true, stock: true, stockMinimal: true, actif: true,
+          fournisseur: { select: { nom: true } },
+        },
+      }),
+      prisma.vente.aggregate({ where: dayWhere, _sum: { total: true }, _count: true }),
+      prisma.vente.aggregate({ where: periodWhere, _sum: { total: true, montantRecu: true }, _count: true }),
+      prisma.vente.aggregate({ where: { statut: 'VALIDEE' }, _sum: { total: true }, _count: true }),
+      prisma.approvisionnement.aggregate({ where: { date: { gte: from, lte: to }, statut: 'VALIDE' }, _sum: { totalAchat: true }, _count: true }),
+      prisma.approvisionnement.count(),
+      prisma.financialTransaction.aggregate({ where: { type: 'DEPENSE' }, _sum: { montant: true } }),
+    ]),
   ]);
 
-  const expMap = await expirationMap();
+  // These read-only datasets are independent too. Fetch them in parallel and
+  // reuse the same medication/expiration snapshot below for alerts/reorders.
+  const [expMap, salesData, purchasePair] = await Promise.all([
+    expirationMap(),
+    dashboardSalesData(from, to, 5),
+    topProduitsAchetePair(from, to, 5),
+  ]);
+  const { series, salesPair, coutVentes } = salesData;
   const enriched = meds.map((m) => enrichMedicament(m, expMap, settings.expSeuils));
   const seuilCourt = settings.expSeuils[settings.expSeuils.length - 1] || 30;
   const valeurStock = round2(enriched.reduce((s, m) => s + m.valeurStockAchat, 0));
   const valeurStockVente = round2(enriched.reduce((s, m) => s + m.valeurStockVente, 0));
 
-  const caToday = round2(ventesToday.reduce((s, v) => s + toNum(v.total), 0));
-  const caPeriod = round2(ventesPeriod.reduce((s, v) => s + toNum(v.total), 0));
-  const paiementsPeriod = round2(ventesPeriod.reduce((s, v) => s + toNum(v.montantRecu), 0));
-
-  const series = await dailySeries(from, to);
-  const [topVendus, flopVendus, topAchete, flopAchete] = await Promise.all([
-    topProduitsVendus(from, to, 'top', 5),
-    topProduitsVendus(from, to, 'flop', 5),
-    topProduitsAchete(from, to, 'top', 5),
-    topProduitsAchete(from, to, 'flop', 5),
-  ]);
-  const reappro = await listeReapprovisionnement(settings);
-  const alertes = await computeAlertes(settings);
-
-  // marge sur période
-  const itemsPeriod = await prisma.venteItem.findMany({
-    where: { vente: { date: { gte: from, lte: to }, statut: 'VALIDEE' } },
-    select: { quantite: true, sousTotal: true, medicament: { select: { prixAchat: true } } },
-  });
-  const coutPeriod = itemsPeriod.reduce((s, i) => s + toNum(i.quantite) * toNum(i.medicament?.prixAchat), 0);
-  const margePeriod = round2(caPeriod - coutPeriod);
+  const caToday = round2(ventesToday._sum.total || 0);
+  const caPeriod = round2(ventesPeriod._sum.total || 0);
+  const paiementsPeriod = round2(ventesPeriod._sum.montantRecu || 0);
+  const reappro = buildReapprovisionnement(enriched, settings);
+  const alertes = computeAlertesFromEnriched(enriched, settings, reappro);
+  const topVendus = salesPair.top;
+  const flopVendus = salesPair.flop;
+  const topAchete = purchasePair.top;
+  const flopAchete = purchasePair.flop;
+  // Reuse the dashboard item snapshot for cost. Keeping the card formula as
+  // before preserves invoice-level discounts (caPeriod - cost) without a
+  // second full venteItem query; the chart keeps its item-level margin series.
+  const margePeriod = round2(caPeriod - coutVentes);
 
   res.json({
     role: req.user.roleId,
@@ -68,8 +81,8 @@ router.get('/', asyncH(async (req, res) => {
       epuises: alertes.epuises,
       expirationProche: alertes.expirationProche,
       expires: alertes.expires,
-      nbVentesJour: ventesToday.length,
-      nbVentes: ventesPeriod.length,
+      nbVentesJour: ventesToday._count,
+      nbVentes: ventesPeriod._count,
       nbVentesTotal: ventesAgg._count,
       caTotal: round2(ventesAgg._sum.total || 0),
       nbApprovisionnements: approsPeriod._count,

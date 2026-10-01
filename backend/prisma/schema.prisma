@@ -144,6 +144,7 @@ model Approvisionnement {
   items           ApprovisionnementItem[]
 
   @@index([date])
+  @@index([statut, date])
   @@index([numero])
 }
 
@@ -164,6 +165,7 @@ model ApprovisionnementItem {
 
   @@index([approvisionnementId])
   @@index([medicamentId])
+  @@index([medicamentId, quantiteRestante, dateExpiration])
   @@index([dateExpiration])
 }
 
@@ -194,6 +196,7 @@ model Vente {
   @@index([date])
   @@index([numero])
   @@index([statut])
+  @@index([statut, date])
   @@index([updatedAt])
 }
 
@@ -291,6 +294,7 @@ model FinancialTransaction {
 
   @@index([date])
   @@index([type])
+  @@index([type, date])
 }
 
 model DailyReport {

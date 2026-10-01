@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import { ApiError, api, clearApiCache, initApiSession, getToken } from '../api/client';
+import { ApiError, api, clearApiCache, initApiSession, AUTH_REQUEST_TIMEOUT_MS } from '../api/client';
 import { setSessionTokens, clearSessionTokens } from '../lib/secureStorage';
 import { clearLocalUser, getLocalUser, saveLocalUser, setActiveUserId } from '../lib/offlineDb';
 
@@ -31,11 +31,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const refreshUser = async () => {
-    await initApiSession();
+    // Hydrate the non-secret profile first. A valid local session should make
+    // the shell usable immediately while the server verifies the session in
+    // the background; the old flow waited for refresh + /me before rendering
+    // anything and could leave a dead API behind an apparently infinite
+    // loader.
+    const cached = await getLocalUser<User>().catch(() => undefined);
+    if (cached && cached.actif !== false) {
+      setUser(cached);
+      await setActiveUserId(cached.id).catch(() => {});
+      setLoading(false);
+      dispatchAuthReady();
+    }
+
     try {
       // Browser sessions use the httpOnly refresh cookie, native sessions use
-      // Keystore/memory. The request is still authoritative whenever reachable.
-      const data = await api.get('/api/auth/me');
+      // Keystore/memory. Both boot requests have a short, explicit timeout.
+      if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        throw new ApiError(0, 'Connexion indisponible');
+      }
+      await initApiSession();
+      const data = await api.get('/api/auth/me', { timeoutMs: AUTH_REQUEST_TIMEOUT_MS });
+      if (cached && cached.id !== data.user.id) clearApiCache();
       setUser(data.user);
       await saveLocalUser(data.user).catch(() => {});
       await setActiveUserId(data.user.id).catch(() => {});
@@ -44,14 +61,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const offline = (error instanceof ApiError && error.status === 0)
         || (typeof navigator !== 'undefined' && navigator.onLine === false);
       if (offline) {
-        const cached = await getLocalUser<User>().catch(() => undefined);
-        if (cached && cached.actif !== false) {
-          setUser(cached);
-          await setActiveUserId(cached.id).catch(() => {});
-          dispatchAuthReady();
-        } else setUser(null);
+        if (!cached || cached.actif === false) setUser(null);
       } else {
-        setUser(null);
+        // A definitive 401/invalid session must remove the cached profile;
+        // timeouts and transport failures keep it for offline continuity.
+        if (!(cached && error instanceof ApiError && error.status === 0)) setUser(null);
       }
     } finally {
       setLoading(false);
@@ -60,7 +74,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => { void refreshUser(); }, []);
   useEffect(() => {
-    const onLogout = () => { setUser(null); void setActiveUserId(null); };
+    const onLogout = () => {
+      // Dashboard/report string caches are not business storage and must never
+      // survive an account switch or a forced 401 logout.
+      clearApiCache();
+      setUser(null);
+      void clearLocalUser().catch(() => {});
+      void setActiveUserId(null);
+    };
     window.addEventListener('ap:logout', onLogout);
     return () => window.removeEventListener('ap:logout', onLogout);
   }, []);
@@ -71,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // the credentials. Native uses the Keystore first and falls back to
     // process memory; browsers use the httpOnly refresh cookie and memory.
     await setSessionTokens(data.accessToken, data.refreshToken ?? null);
+    clearApiCache();
     setUser(data.user);
     await saveLocalUser(data.user).catch(() => {});
     await setActiveUserId(data.user.id).catch(() => {});

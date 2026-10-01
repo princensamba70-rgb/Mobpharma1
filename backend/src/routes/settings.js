@@ -6,6 +6,7 @@ import { validate } from '../middleware/validate.js';
 import { asyncH } from '../middleware/error.js';
 import { logAudit, clientIp } from '../lib/utils.js';
 import { config } from '../config.js';
+import { invalidateSettingsCache } from '../lib/stats.js';
 
 const router = Router();
 
@@ -57,6 +58,7 @@ router.put('/', authenticate, requirePerm('parametres', 'full'), validate(z.obje
   for (const u of upserts) {
     await prisma.setting.upsert({ where: { key: u.key }, create: u, update: { value: u.value } });
   }
+  invalidateSettingsCache();
   await logAudit(prisma, { user: req.user, action: 'UPDATE_SETTINGS', module: 'parametres', ip: clientIp(req), description: 'Modification des paramètres', nouvelleValeur: d });
   res.json({ ok: true, message: 'Paramètres enregistrés' });
 }));

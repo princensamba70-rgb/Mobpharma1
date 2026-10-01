@@ -44,6 +44,7 @@ export default function Facturation() {
   useEffect(() => {
     if (q.trim().length < 1) { setResults([]); return; }
     let active = true;
+    const controller = new AbortController();
     setSearching(true);
     const t = window.setTimeout(() => {
       void (async () => {
@@ -54,7 +55,7 @@ export default function Facturation() {
           return;
         }
         try {
-          const remote = await api.get(`/api/medicaments/search?q=${encodeURIComponent(q.trim())}`);
+          const remote = await api.get(`/api/medicaments/search?q=${encodeURIComponent(q.trim())}`, { timeoutMs: 7_000, signal: controller.signal });
           await saveMedicaments(remote).catch(() => {});
           if (active) setResults(remote);
         } catch {
@@ -64,7 +65,7 @@ export default function Facturation() {
         }
       })();
     }, 220);
-    return () => { active = false; window.clearTimeout(t); };
+    return () => { active = false; controller.abort(); window.clearTimeout(t); };
   }, [q]);
 
   const addToCart = (med: Med) => {

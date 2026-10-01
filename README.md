@@ -7,6 +7,8 @@ Application professionnelle de gestion de pharmacie, issue du projet `App-partag
 > **Version actuelle :** `1.0.0` (`versionCode 1`)
 > **Langue / devise :** français / CDF
 
+> **Rapport performance détaillé :** [`docs/performance-optimisation.md`](docs/performance-optimisation.md) — mesures réelles, inventaire statique des requêtes, limitations backend/Android et hash APK.
+
 ## 1. Audit de l'application existante
 
 Le dépôt source fourni par `princensamba70-rgb/App-partage1` contenait l'archive `ami-pharma-docker-fix.zip`. Après extraction, l'architecture réellement trouvée est la suivante :
@@ -240,8 +242,8 @@ Une build debug installable est également livrée dans `artifacts/ami-pharma-de
 | version | `1.0.0` / `versionCode 1` |
 | application ID | `com.amipharma.gestion` |
 | SDK fallback | min 24 / target 34 (le projet Capacitor Gradle cible 36) |
-| taille | `267 235 octets` |
-| SHA-256 | `258edc5caaba224edc75549b7874d3457536f38eaf7a1a6e301ea4e51dedd212` |
+| taille | `302 775 octets` |
+| SHA-256 | `f11da9dbf228383b96b0fd350b6a0667db11ee7718e008bf4c8a2eaf6b722737` |
 | vérification | signature APK v2/v3 valide, manifeste contrôlé par `aapt2 dump badging` |
 
 Cette sandbox ne disposait pas du JDK/SDK requis par Gradle et le runtime Java réduit ne fournit pas `java.compiler`. L'APK livré a donc été produit par le wrapper de secours documenté dans `tools/android-fallback/`, avec le bundle React/IndexedDB/service-worker actuel, un wrapper dex de développement déjà compilé et un stockage AES/GCM protégé par Android Keystore. La signature v2/v3 a été vérifiée ; ce n'est pas un build Gradle officiel. Le projet `android/` Capacitor reste la voie canonique et doit être utilisé pour les builds de release et pour bénéficier de tous les plugins Capacitor. L'APK de secours accepte les endpoints `http://` et `https://` ; sa valeur par défaut est l'émulateur Android (`http://10.0.2.2:4000`). Sur un téléphone, renseignez l'URL API depuis **Serveur de données** ou reconstruisez avec `VITE_API_URL`. Aucun secret réel ni clé privée n'est livré dans le dépôt.
@@ -270,13 +272,13 @@ Sans ces variables, Gradle peut produire un release non signé destiné à une s
 ✅ Commandes passées avec succès :
 
 - `npm run web:build` : TypeScript/Vite et bundle app shell ;
-- `npm --prefix frontend run test` : 3 fichiers, 9 tests, dont la base IndexedDB, le snapshot de prix, la réservation stock, `sync_queue`, l’acquittement et l’annulation locale ;
+- `npm --prefix frontend run test` : 3 fichiers, 10 tests, dont la base IndexedDB, le snapshot de prix, la réservation stock, `sync_queue`, l’acquittement et l’annulation locale ;
 - `npm --prefix backend run test` : 5 tests Node sur arrondis, stock et cookies HTTP/HTTPS ;
-- `npm test` à la racine : build frontend, 9 tests frontend et 5 tests backend ;
+- `npm test` à la racine : build frontend, 10 tests frontend et 5 tests backend ;
 - `node --check` sur tous les fichiers `backend/src/**/*.js` ;
 - `npm run mobile:sync` puis `npm run cap:doctor` : Capacitor 8, plugins et assets Android synchronisés ;
 - wrapper fallback : bundle avec IndexedDB/service worker inclus, manifeste inspecté, APK signé et vérifié en signatures v2/v3 ;
-- SHA-256 recalculé après cette actualisation : `258edc5caaba224edc75549b7874d3457536f38eaf7a1a6e301ea4e51dedd212`.
+- SHA-256 recalculé après cette actualisation : `f11da9dbf228383b96b0fd350b6a0667db11ee7718e008bf4c8a2eaf6b722737`.
 
 ⚠ Vérifications non exécutées dans cette sandbox :
 

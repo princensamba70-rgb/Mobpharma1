@@ -103,4 +103,20 @@ describe('API authentication transport', () => {
       .rejects.toMatchObject({ status: 0 });
     expect(session.accessToken).toBeNull();
   });
+
+  it('cancels a superseded GET without marking the API offline', async () => {
+    const client = await loadClient();
+    client.setApiOrigin('https://pharmacy.example');
+    fetchMock.mockImplementation((_url: string, options: RequestInit) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')));
+    }));
+    const controller = new AbortController();
+    const pending = client.api.get('/api/medicaments/search?q=am', { signal: controller.signal, timeoutMs: 7_000 });
+    await Promise.resolve();
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    const events = (window.dispatchEvent as any).mock.calls.map(([event]: [CustomEvent]) => event.type);
+    expect(events).not.toContain('ap:api-offline');
+  });
 });

@@ -52,6 +52,19 @@ app.use(cookieParser());
 // Rate limiting global API
 app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 600, standardHeaders: true, legacyHeaders: false }));
 
+// Opt-in request timing for performance validation. It is disabled by default
+// so normal production logs do not grow for every API call.
+if (process.env.API_TIMING_LOG === 'true') {
+  app.use('/api', (req, res, next) => {
+    const started = process.hrtime.bigint();
+    res.on('finish', () => {
+      const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+      console.info(`[api-timing] ${req.method} ${req.originalUrl} ${res.statusCode} ${elapsedMs.toFixed(1)}ms`);
+    });
+    next();
+  });
+}
+
 app.get('/api/health', (req, res) => res.json({ ok: true, app: 'AMI PHARMA API', time: new Date().toISOString() }));
 
 app.use('/api/auth', authRoutes);
